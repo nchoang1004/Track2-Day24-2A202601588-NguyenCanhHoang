@@ -1,44 +1,82 @@
 """BƯỚC 3d — audit ledger append-only, tamper-evident (10').
 
-JSONL, mỗi tool call một dòng. Đọc Guide.md (§3d).
+JSONL, mỗi tool call một dòng.
 
-Interface bắt buộc (tests/test_ledger.py và agent/runner.py gọi trực tiếp):
-
+Interface bắt buộc:
     append(entry: dict, path: pathlib.Path) -> dict
-        `entry` phải có tối thiểu các field:
-            ts, agent_id, run_id, tool, args_hash, classification,
-            decision, reason
-        Hàm tự thêm 2 field:
-            prev_hash  = hash của dòng ngay trước trong file này, hoặc
-                         "0" * 64 nếu là dòng đầu tiên
-            hash       = sha256 tính từ nội dung dòng NÀY (bao gồm cả
-                         prev_hash, KHÔNG bao gồm field hash) — dùng
-                         json.dumps(..., sort_keys=True) trước khi hash
-                         để thứ tự field không ảnh hưởng kết quả.
-        Append 1 dòng JSON (utf-8, ensure_ascii=False) vào cuối `path`,
-        tạo file/thư mục cha nếu chưa có. Trả về dict đầy đủ đã ghi
-        (bao gồm prev_hash/hash).
-
     verify(path: pathlib.Path) -> bool
-        Đọc toàn bộ file, trả về True nếu TẤT CẢ đều đúng:
-          - mọi dòng có `reason` non-empty
-          - prev_hash của dòng n == hash đã lưu của dòng n-1 (dòng đầu so
-            với "0" * 64)
-          - hash lưu trong dòng n khớp lại khi tính lại từ nội dung dòng đó
-        Trả về False nếu bất kỳ dòng nào bị sửa/xoá/chèn giữa file, hoặc
-        thiếu reason.
-
-Sinh viên phải tự tay chứng minh được: sửa 1 ký tự trong 1 dòng giữa file
-rồi gọi verify() phải trả về False.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
+
+GENESIS_HASH = "0" * 64
+
+
+def _compute_hash(entry_dict: dict) -> str:
+    """Tính SHA-256 từ nội dung entry (loại bỏ trường 'hash' nếu có)."""
+    to_hash = {k: v for k, v in entry_dict.items() if k != "hash"}
+    serialized = json.dumps(to_hash, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def append(entry: dict, path: Path) -> dict:
-    raise NotImplementedError("BƯỚC 3d: implement ledger append")
+    """Ghi nối một dòng kiểm toán vào ledger với chuỗi hash chống sửa đổi."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    prev_hash = GENESIS_HASH
+    if path.exists() and path.stat().st_size > 0:
+        lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        if lines:
+            last_entry = json.loads(lines[-1])
+            prev_hash = last_entry.get("hash", GENESIS_HASH)
+
+    entry_to_write = dict(entry)
+    entry_to_write["prev_hash"] = prev_hash
+    entry_hash = _compute_hash(entry_to_write)
+    entry_to_write["hash"] = entry_hash
+
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry_to_write, ensure_ascii=False) + "\n")
+
+    return entry_to_write
 
 
 def verify(path: Path) -> bool:
-    raise NotImplementedError("BƯỚC 3d: implement ledger verify")
+    """Xác minh tính toàn vẹn của toàn bộ file ledger."""
+    path = Path(path)
+    if not path.exists() or path.stat().st_size == 0:
+        return True
+
+    lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not lines:
+        return True
+
+    expected_prev_hash = GENESIS_HASH
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except Exception:
+            return False
+
+        # 1. Kiểm tra trường reason bắt buộc phải non-empty
+        reason = entry.get("reason")
+        if not reason or not str(reason).strip():
+            return False
+
+        # 2. Kiểm tra chuỗi liên kết prev_hash
+        if entry.get("prev_hash") != expected_prev_hash:
+            return False
+
+        # 3. Kiểm tra tính toàn vẹn của hash dòng hiện tại
+        recorded_hash = entry.get("hash")
+        computed_hash = _compute_hash(entry)
+        if recorded_hash != computed_hash:
+            return False
+
+        expected_prev_hash = recorded_hash
+
+    return True
