@@ -1,0 +1,6 @@
+# Bằng chứng tấn công sau khi contain (Bước 4)
+# Thời gian: 2026-08-26
+# Trạng thái Sink: Rỗng (Không có payload nào tới localhost:9999)
+# Trích xuất dòng quyết định Deny từ reports/ledger.jsonl:
+
+{"ts": "2026-08-26T07:27:50.513382+00:00", "agent_id": "lab24-agent", "run_id": "run-b", "tool": "http_post", "args_hash": "bf08d88935fae775", "classification": "restricted", "decision": "deny", "reason": "Denied egress for restricted data by agent run-b (purpose: exfiltration-reconcile)", "prev_hash": "5feaa982a5ec9ea6cc27d167257b570a296a9c54a59c5c3ec898d095975dbf5a", "hash": "0151dcfe935616fe35200d81825bed9fa7497e2c1836f1dc6ef5cf524a028de1"}
